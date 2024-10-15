@@ -1,0 +1,64 @@
+# This workflow will build the Docker image and deploy the application
+
+name: React ICO-Frontend application
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and Push Docker image to Docker Hub
+    runs-on: [self-hosted, frontend-runner]
+    steps:
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      - name: Check out the repo
+        uses: actions/checkout@v2
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: ./
+          file: ./Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/ico-frontend:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
+  deploy:
+    name: Deploy Docker image
+    needs: [build]
+    runs-on: self-hosted
+    steps:
+      - name: Remove unused images
+        run: docker image prune --all --force
+      - name: Pull image
+        run: docker pull ${{ secrets.DOCKER_USERNAME }}/ico-frontend:latest
+      - name: Remove docker
+        run: |
+          if docker ps -a --format '{{.Names}}' | grep -q '${{ secrets.DOCKER_USERNAME }}-ico-frontend'; then
+            docker stop ${{ secrets.DOCKER_USERNAME }}-ico-frontend
+            docker rm -fv ${{ secrets.DOCKER_USERNAME }}-ico-frontend
+          fi
+      - name: Run deploy
+        run: docker run --name ${{ secrets.DOCKER_USERNAME }}-ico-frontend -d -p 6080:8080 --restart unless-stopped --network="ico-network" "${{ secrets.DOCKER_USERNAME }}/ico-frontend:latest"
+
+
